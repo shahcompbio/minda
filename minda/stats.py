@@ -67,7 +67,11 @@ def _get_stats_df(tp_df, fn_df, fp_df, paired_df, base_df, caller_name, max_len,
     if tp+fn == 0:
         sys.exit(f"{caller_name} has no TP or FN records. Please double check input files.")
     recall = tp/(tp+fn)
-    f1 = (2*precision*recall)/(precision+recall)
+    # Handle edge case where both precision and recall are 0
+    if precision + recall == 0:
+        f1 = 0.0
+    else:
+        f1 = (2 * precision * recall) / (precision + recall)
 
     caller_len = len(paired_df)
     base_len = len(base_df)
