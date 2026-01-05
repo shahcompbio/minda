@@ -359,7 +359,9 @@ def get_decomposed_dfs(caller_name, df, filter, min_size, prefixed, vaf, sample_
         df['VAF'] = df.INFO.str.extract(r';VAF=([\d.]+)')[0].astype('float').to_list()
         if df.VAF.isnull().all() == True:
             sys.exit(f"No VAF values found in {caller_name} VCF. Run Minda without --vaf parameter or add VAF to INFO. ")
-    
+    # extract strand information
+    # change
+    df['STRANDS'] = df.INFO.
     # get indices of mate rows
     df = _get_alt_mate_index(df)
 
