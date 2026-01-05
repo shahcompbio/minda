@@ -65,10 +65,10 @@ def get_df(vcf):
     """
     is_vcf_gz = _is_vcf_gz(vcf)
     if is_vcf_gz == False:
-        df = pd.read_csv(vcf, comment='#', sep='\t', usecols=[0,1,2,4,6,7], header=None, dtype={'#CHROM': 'str', 'POS':'Int64'})
+        df = pd.read_csv(vcf, comment='#', sep='\t', usecols=[0,1,2,3,4,6,7], header=None, dtype={'#CHROM': 'str', 'POS':'Int64'})
     else:
-        df = pd.read_csv(vcf, comment='#', sep='\t', usecols=[0,1,2,4,6,7], header=None, compression='gzip', dtype={'#CHROM': 'str', 'POS':'Int64'})
-    df.columns = ['#CHROM', 'POS', 'ID', 'ALT', 'FILTER', 'INFO']
+        df = pd.read_csv(vcf, comment='#', sep='\t', usecols=[0,1,2,3,4,6,7], header=None, compression='gzip', dtype={'#CHROM': 'str', 'POS':'Int64'})
+    df.columns = ['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'FILTER', 'INFO']
     
     return df
 
@@ -81,8 +81,8 @@ def get_intersected_df(vcf, bed):
     bed_to_bt = BedTool(bed)
     vcf_to_bt = BedTool(vcf)
     intersect_obj = vcf_to_bt.intersect(bed_to_bt, u=True)
-    df = BedTool.to_dataframe(intersect_obj, header=None, usecols=[0,1,2,4,6,7], dtype={'#CHROM': 'str', 'POS':'int'})
-    df.columns = ['#CHROM', 'POS', 'ID', 'ALT', 'FILTER', 'INFO']
+    df = BedTool.to_dataframe(intersect_obj, header=None, usecols=[0,1,2,3,4,6,7], dtype={'#CHROM': 'str', 'POS':'int'})
+    df.columns = ['#CHROM', 'POS', 'ID', 'REF', 'ALT', 'FILTER', 'INFO']
     return df
 
 
