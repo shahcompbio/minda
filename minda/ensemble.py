@@ -195,13 +195,15 @@ def _get_ensemble_call_column(support_df, conditions):
     #support_df['ensemble'] = mask 
     support_df.insert(loc=12, column='ensemble', value=mask)
     return support_df
-    
-def _replace_value(row):
-    if row['ALT'] == '<BND>':
-        return f"N]{row['#CHROM_y']}:{row['POS_y']}]"
+
+def _set_alt(row):
+    """
+    set alt value for BNDs to encompass strand info
+    """
+    if row["SVTYPE"] == "BND":
+        return row["ALT"]
     else:
-        return row['ALT']
-    
+        return f"<{row["SVTYPE"]}>"
 def _get_contigs(vcf_list):
     contig_dict = {}
     for vcf in vcf_list:
@@ -227,9 +229,8 @@ def _get_contigs(vcf_list):
 def _get_ensemble_vcf(vcf_list, support_df, out_dir, sample_name, args, vaf, version):
     vcf_df = support_df[support_df['ensemble'] == True].reset_index(drop=True).copy()
     vcf_df['ID'] = f'Minda_' + (vcf_df.index + 1).astype(str)
-    vcf_df['REF'] = "N" 
-    vcf_df['ALT'] = ["<" + svtype +">" for svtype in vcf_df['SVTYPE']]
-    vcf_df['ALT'] = vcf_df.apply(_replace_value, axis=1)
+    vcf_df['REF'] = "N"
+    vcf_df['ALT'] = vcf_df.apply(_set_alt, axis=1)
     vcf_df['QUAL'] = "."
     vcf_df['FILTER'] = "PASS"
 
@@ -275,8 +276,8 @@ def get_support_df(vcf_list, decomposed_dfs_list, caller_names, tolerance, condi
             caller_column.append(call_boolean)
         ensemble_df[f'{caller_name}'] = caller_column
 
-    column_names = ['#CHROM_x', 'POS_x', 'locus_group_x', 'ID_list_x',  \
-                    '#CHROM_y', 'POS_y', 'locus_group_y', 'ID_list_y', \
+    column_names = ['#CHROM_x', 'POS_x', 'locus_group_x', 'ID_list_x',
+                    '#CHROM_y', 'POS_y', 'locus_group_y', 'ID_list_y', 'ALT',
                     'SVTYPE', 'SVLEN', 'VAF', 'Minda_ID_list_y'] + caller_names
     
     support_df = ensemble_df[column_names].rename(columns={"Minda_ID_list_y": "Minda_IDs"}).copy()
