@@ -1,11 +1,37 @@
 import sys
+from ast import parse
 from collections import Counter
 from datetime import datetime
 import pandas as pd 
 import numpy as np
 import re
 
+def parse_bnd_alt(alt_string):
+    '''
+    Parse the BND alt string and return separators and region
+    adapted from svtools package
+    '''
+    # NOTE The below is ugly but intended to match things like [2:222[ and capture the brackets
+    result = re.findall(r'([][])(.+?)([][])', alt_string)
+    assert result, "%s\n" % alt_string
+    sep1, _ , sep2 = result[0]
+    assert sep1 == sep2
+    return sep1
 
+def _infer_strands(svtype, alt):
+    orientation1 = orientation2 = '+'
+    if svtype == "DEL" or svtype == "INS":
+        orientation2 = "-"
+    else:
+        sep = parse_bnd_alt(alt)
+        if alt.startswith(sep):
+            orientation1 = "-"
+        if sep == "[":
+            orientation2 = "-"
+    return orientation1+orientation2
+
+
+    return strands
 def _add_columns(ensemble_df, vaf):
     # create a column of list of prefixed IDs for each locus group
     key_columns = ['locus_group_x','locus_group_y']
@@ -268,7 +294,10 @@ def get_support_df(vcf_list, decomposed_dfs_list, caller_names, tolerance, condi
             call_boolean  = any(value.startswith(caller_name) for value in intersect_list)
             caller_column.append(call_boolean)
         ensemble_df[f'{caller_name}'] = caller_column
-
+    # add in a column for strands
+    strands = []
+    for row in ensemble_df.itertuples():
+        row.ALT_x
     column_names = ['#CHROM_x', 'POS_x', 'locus_group_x', 'ID_list_x',
                     '#CHROM_y', 'POS_y', 'locus_group_y', 'ID_list_y',
                     'REF_x', 'REF_y', 'ALT_x', 'ALT_y',
