@@ -19,9 +19,17 @@ def parse_bnd_alt(alt_string):
     return sep1
 
 def _infer_strands(svtype, alt):
-    orientation1 = orientation2 = '+'
-    if svtype == "DEL" or svtype == "INS":
+    """
+    infer SV strands from ALT
+    """
+    valid_svtypes = {"DEL", "INS", "DUP", "INV", "BND"}
+    assert svtype in valid_svtypes, f"invalid svtype: {svtype}. must be one of {valid_svtypes}"
+
+    orientation1 = orientation2 = "+"
+    if svtype in ("DEL", "INS") or alt in ("<DEL>", "<INS>"):
         orientation2 = "-"
+    elif svtype == "DUP" or "DUP" in alt:
+        orientation1 = "-"
     else:
         sep = parse_bnd_alt(alt)
         if alt.startswith(sep):
@@ -30,8 +38,6 @@ def _infer_strands(svtype, alt):
             orientation2 = "-"
     return orientation1+orientation2
 
-
-    return strands
 def _add_columns(ensemble_df, vaf):
     # create a column of list of prefixed IDs for each locus group
     key_columns = ['locus_group_x','locus_group_y']
@@ -247,15 +253,17 @@ def _get_ensemble_vcf(vcf_list, support_df, out_dir, sample_name, args, vaf, ver
     if vaf != None:
         vcf_df['INFO'] = ['SVLEN=' + str(svlen) + ';SVTYPE=' + svtype + \
                           ';CHR2=' + str(chr2) + ';END=' + str(end) + \
+                          ';STRANDS=' + strands + \
                           ';SUPP_VEC=' + ','.join(map(str, supp_vec)) + ';VAF=' + str(vaf) \
-                          for svlen, svtype, chr2, end, supp_vec, vaf in zip(vcf_df['SVLEN'],vcf_df['SVTYPE'], vcf_df['#CHROM_y'], vcf_df['POS_y'], vcf_df['ID_list_y'], vcf_df['VAF'])]
+                          for svlen, svtype, chr2, end, strands, supp_vec, vaf in zip(vcf_df['SVLEN'],vcf_df['SVTYPE'], vcf_df['#CHROM_y'], vcf_df['POS_y'], vcf_df['STRANDS'], vcf_df['ID_list_y'], vcf_df['VAF'])]
         vcf_df = (vcf_df[['#CHROM_x', 'POS_x', 'ID', 'REF_x', 'ALT_x', 'QUAL', 'FILTER','INFO']]
                   .rename(columns={'#CHROM_x':"#CHROM", "POS_x":"POS", "REF_x":"REF", "ALT_x": "ALT"}))
     else:
         vcf_df['INFO'] = ['SVLEN=' + str(svlen) + ';SVTYPE=' + svtype + \
                           ';CHR2=' + str(chr2) + ';END=' + str(end) + \
+                          ';STRANDS=' + strands + \
                           ';SUPP_VEC=' + ','.join(map(str, supp_vec)) \
-                          for svlen, svtype, chr2, end, supp_vec in zip(vcf_df['SVLEN'],vcf_df['SVTYPE'], vcf_df['#CHROM_y'], vcf_df['POS_y'], vcf_df['ID_list_y'])]
+                          for svlen, svtype, chr2, end, strands, supp_vec in zip(vcf_df['SVLEN'],vcf_df['SVTYPE'], vcf_df['#CHROM_y'], vcf_df['POS_y'], vcf_df['STRANDS'], vcf_df['ID_list_y'])]
         vcf_df = (vcf_df[['#CHROM_x', 'POS_x', 'ID', 'REF_x', 'ALT_x', 'QUAL', 'FILTER','INFO']]
                   .rename(columns={'#CHROM_x':"#CHROM", "POS_x":"POS", "REF_x": "REF", "ALT_x": "ALT"}))
     date = datetime.today().strftime('%Y-%m-%d')
@@ -272,6 +280,7 @@ def _get_ensemble_vcf(vcf_list, support_df, out_dir, sample_name, args, vaf, ver
                    '##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Length of the structural variant">\n'
                    '##INFO=<ID=CHR2,Number=1,Type=String,Description="Chromosome for END coordinate">\n'
                    '##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the structural variant">\n'
+                   '##INFO=<ID=STRANDS,Number=1,Type=String,Description="Breakpoint strandedness (first_to_second)">\n'
                    '##INFO=<ID=SUPP_VEC,Number=.,Type=String,Description="IDs of support records">\n')
         if vaf != None:
             file.write('##INFO=<ID=VAF,Number=1,Type=Float,Description="Variant allele frequency">\n')
@@ -297,10 +306,15 @@ def get_support_df(vcf_list, decomposed_dfs_list, caller_names, tolerance, condi
     # add in a column for strands
     strands = []
     for row in ensemble_df.itertuples():
-        row.ALT_x
+        alt = row.ALT_x
+        svtype = row.SVTYPE
+        strands1 = _infer_strands(svtype, alt)
+        strands.append(strands1)
+    ensemble_df["STRANDS"] = strands
+
     column_names = ['#CHROM_x', 'POS_x', 'locus_group_x', 'ID_list_x',
                     '#CHROM_y', 'POS_y', 'locus_group_y', 'ID_list_y',
-                    'REF_x', 'REF_y', 'ALT_x', 'ALT_y',
+                    'REF_x', 'REF_y', 'ALT_x', 'ALT_y', 'STRANDS',
                     'SVTYPE', 'SVLEN', 'VAF', 'Minda_ID_list_y'] + caller_names
     
     support_df = ensemble_df[column_names].rename(columns={"Minda_ID_list_y": "Minda_IDs"}).copy()
