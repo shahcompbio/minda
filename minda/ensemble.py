@@ -2,9 +2,11 @@ import sys
 from ast import parse
 from collections import Counter
 from datetime import datetime
-import pandas as pd 
+import pandas as pd
 import numpy as np
 import re
+import gzip
+from minda.decompose import _is_vcf_gz
 
 def parse_bnd_alt(alt_string):
     '''
@@ -225,7 +227,11 @@ def _get_ensemble_call_column(support_df, conditions):
 def _get_contigs(vcf_list):
     contig_dict = {}
     for vcf in vcf_list:
-        with open(vcf, 'r') as file:
+        is_vcf_gz = _is_vcf_gz(vcf)
+        open_func = gzip.open if is_vcf_gz else open
+        mode = 'rt' if is_vcf_gz else 'r'
+
+        with open_func(vcf, mode) as file:
             for line in file:
                 if not line.startswith("##"):
                     break
