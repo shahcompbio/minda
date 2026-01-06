@@ -1,10 +1,44 @@
 import sys
+from ast import parse
 from collections import Counter
 from datetime import datetime
-import pandas as pd 
+import pandas as pd
 import numpy as np
 import re
+import gzip
+from minda.decompose import _is_vcf_gz
 
+def parse_bnd_alt(alt_string):
+    '''
+    Parse the BND alt string and return separators and region
+    adapted from svtools package
+    '''
+    # NOTE The below is ugly but intended to match things like [2:222[ and capture the brackets
+    result = re.findall(r'([][])(.+?)([][])', alt_string)
+    assert result, "%s\n" % alt_string
+    sep1, _ , sep2 = result[0]
+    assert sep1 == sep2
+    return sep1
+
+def _infer_strands(svtype, alt):
+    """
+    infer SV strands from ALT
+    """
+    valid_svtypes = {"DEL", "INS", "DUP", "INV", "BND"}
+    assert svtype in valid_svtypes, f"invalid svtype: {svtype}. must be one of {valid_svtypes}"
+
+    orientation1 = orientation2 = "+"
+    if svtype in ("DEL", "INS") or alt in ("<DEL>", "<INS>"):
+        orientation2 = "-"
+    elif svtype == "DUP" or "DUP" in alt:
+        orientation1 = "-"
+    else:
+        sep = parse_bnd_alt(alt)
+        if alt.startswith(sep):
+            orientation1 = "-"
+        if sep == "[":
+            orientation2 = "-"
+    return orientation1+orientation2
 
 def _add_columns(ensemble_df, vaf):
     # create a column of list of prefixed IDs for each locus group
@@ -72,7 +106,7 @@ def _get_ensemble_df(decomposed_dfs_list, caller_names, tolerance, vaf, out_dir,
     # create stat dfs
     start_dfs_list = []
     start_dfs = pd.concat(dfs_1).reset_index(drop=True)
-    start_dfs = start_dfs[['#CHROM', 'POS', 'ID', 'Minda_ID', 'INFO', 'SVTYPE', 'SVLEN']].sort_values(['#CHROM', 'POS'])
+    start_dfs = start_dfs[['#CHROM', 'POS', 'ID', 'Minda_ID', 'INFO', 'SVTYPE', 'SVLEN', 'REF', 'ALT']].sort_values(['#CHROM', 'POS'])
     
     start_dfs['diff_x'] = start_dfs.groupby('#CHROM').POS.diff().fillna(9999)
     diffs = start_dfs['diff_x'].to_list()
@@ -98,17 +132,11 @@ def _get_ensemble_df(decomposed_dfs_list, caller_names, tolerance, vaf, out_dir,
 
     #ensemble_df = start_dfs.merge(end_dfs, on=['SVTYPE', 'SVLEN','Minda_ID'])
     ensemble_df = start_dfs.merge(end_dfs, on=['SVTYPE', 'Minda_ID'])
-    ensemble_df[['#CHROM_x', 'POS_x', 'ID_x', 'Minda_ID', 'SVTYPE', 'SVLEN',\
-           'diff_x', 'locus_group_x', 'median', '#CHROM_y', 'POS_y',\
-           'ID_y', ]]
     ensemble_df = ensemble_df.sort_values(['locus_group_x','#CHROM_y', 'POS_y'])
     ensemble_df ['diff_y'] = ensemble_df.groupby(['locus_group_x','#CHROM_y']).POS_y.diff().abs().fillna(9999)
     diffs = ensemble_df['diff_y'].to_list()
     caller_names = ensemble_df['Minda_ID'].apply(lambda x: x.rsplit('_', 1)[0]).tolist()
     ensemble_df['caller_names']= caller_names
-    ensemble_df[['#CHROM_x', 'POS_x', 'ID_x', 'Minda_ID', 'SVTYPE', 'SVLEN',\
-           'diff_x', 'locus_group_x', 'median', '#CHROM_y', 'POS_y',\
-           'ID_y','diff_y','caller_names' ]]
 
     # group end loci
     locus_callers = []
@@ -195,17 +223,15 @@ def _get_ensemble_call_column(support_df, conditions):
     #support_df['ensemble'] = mask 
     support_df.insert(loc=12, column='ensemble', value=mask)
     return support_df
-    
-def _replace_value(row):
-    if row['ALT'] == '<BND>':
-        return f"N]{row['#CHROM_y']}:{row['POS_y']}]"
-    else:
-        return row['ALT']
-    
+
 def _get_contigs(vcf_list):
     contig_dict = {}
     for vcf in vcf_list:
-        with open(vcf, 'r') as file:
+        is_vcf_gz = _is_vcf_gz(vcf)
+        open_func = gzip.open if is_vcf_gz else open
+        mode = 'rt' if is_vcf_gz else 'r'
+
+        with open_func(vcf, mode) as file:
             for line in file:
                 if not line.startswith("##"):
                     break
@@ -227,34 +253,43 @@ def _get_contigs(vcf_list):
 def _get_ensemble_vcf(vcf_list, support_df, out_dir, sample_name, args, vaf, version):
     vcf_df = support_df[support_df['ensemble'] == True].reset_index(drop=True).copy()
     vcf_df['ID'] = f'Minda_' + (vcf_df.index + 1).astype(str)
-    vcf_df['REF'] = "N" 
-    vcf_df['ALT'] = ["<" + svtype +">" for svtype in vcf_df['SVTYPE']]
-    vcf_df['ALT'] = vcf_df.apply(_replace_value, axis=1)
     vcf_df['QUAL'] = "."
     vcf_df['FILTER'] = "PASS"
 
     if vaf != None:
         vcf_df['INFO'] = ['SVLEN=' + str(svlen) + ';SVTYPE=' + svtype + \
+                          ';CHR2=' + str(chr2) + ';END=' + str(end) + \
+                          ';STRANDS=' + strands + \
                           ';SUPP_VEC=' + ','.join(map(str, supp_vec)) + ';VAF=' + str(vaf) \
-                          for svlen, svtype, supp_vec, vaf in zip(vcf_df['SVLEN'],vcf_df['SVTYPE'], vcf_df['ID_list_y'], vcf_df['VAF'])]
-        vcf_df = vcf_df[['#CHROM_x', 'POS_x', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER','INFO']].rename(columns={'#CHROM_x':"#CHROM", "POS_x":"POS"})
+                          for svlen, svtype, chr2, end, strands, supp_vec, vaf in zip(vcf_df['SVLEN'],vcf_df['SVTYPE'], vcf_df['#CHROM_y'], vcf_df['POS_y'], vcf_df['STRANDS'], vcf_df['ID_list_y'], vcf_df['VAF'])]
+        vcf_df = (vcf_df[['#CHROM_x', 'POS_x', 'ID', 'REF_x', 'ALT_x', 'QUAL', 'FILTER','INFO']]
+                  .rename(columns={'#CHROM_x':"#CHROM", "POS_x":"POS", "REF_x":"REF", "ALT_x": "ALT"}))
     else:
-        vcf_df['INFO'] = ['SVLEN=' + str(svlen) + ';SVTYPE=' + svtype + ';SUPP_VEC=' + ','.join(map(str, supp_vec)) \
-                          for svlen, svtype, supp_vec in zip(vcf_df['SVLEN'],vcf_df['SVTYPE'], vcf_df['ID_list_y'])]
-        vcf_df = vcf_df[['#CHROM_x', 'POS_x', 'ID', 'REF', 'ALT', 'QUAL', 'FILTER','INFO']].rename(columns={'#CHROM_x':"#CHROM", "POS_x":"POS"})
+        vcf_df['INFO'] = ['SVLEN=' + str(svlen) + ';SVTYPE=' + svtype + \
+                          ';CHR2=' + str(chr2) + ';END=' + str(end) + \
+                          ';STRANDS=' + strands + \
+                          ';SUPP_VEC=' + ','.join(map(str, supp_vec)) \
+                          for svlen, svtype, chr2, end, strands, supp_vec in zip(vcf_df['SVLEN'],vcf_df['SVTYPE'], vcf_df['#CHROM_y'], vcf_df['POS_y'], vcf_df['STRANDS'], vcf_df['ID_list_y'])]
+        vcf_df = (vcf_df[['#CHROM_x', 'POS_x', 'ID', 'REF_x', 'ALT_x', 'QUAL', 'FILTER','INFO']]
+                  .rename(columns={'#CHROM_x':"#CHROM", "POS_x":"POS", "REF_x": "REF", "ALT_x": "ALT"}))
     date = datetime.today().strftime('%Y-%m-%d')
     with open(f'{out_dir}/{sample_name}_minda_ensemble.vcf', 'w') as file:
         file.write(f'##fileformat=VCFv4.2\n##fileDate={date}\n##source=MindaV{version}\n')
+        command_str = " ".join(sys.argv)
+        file.write(f"##CommandLine= {command_str}\n")
         contig_dict = _get_contigs(vcf_list)
         for key, value in contig_dict.items():
             file.write(f'##contig=<ID={key},length={value}>\n')
         file.write('##ALT=<ID=DEL,Description="Deletion">\n##ALT=<ID=INS,Description="Insertion">\n##ALT=<ID=DUP,Description="Duplication">\n##ALT=<ID=INV,Description="Inversion">\n')
         file.write('##FILTER=<ID=PASS,Description="Default">\n')
-        file.write('##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">\n##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Length of the structural variant">\n##INFO=<ID=SUPP_VEC,Number=.,Type=String,Description="IDs of support records">\n')
+        file.write('##INFO=<ID=SVTYPE,Number=1,Type=String,Description="Type of structural variant">\n'
+                   '##INFO=<ID=SVLEN,Number=1,Type=Integer,Description="Length of the structural variant">\n'
+                   '##INFO=<ID=CHR2,Number=1,Type=String,Description="Chromosome for END coordinate">\n'
+                   '##INFO=<ID=END,Number=1,Type=Integer,Description="End position of the structural variant">\n'
+                   '##INFO=<ID=STRANDS,Number=1,Type=String,Description="Breakpoint strandedness (first_to_second)">\n'
+                   '##INFO=<ID=SUPP_VEC,Number=.,Type=String,Description="IDs of support records">\n')
         if vaf != None:
             file.write('##INFO=<ID=VAF,Number=1,Type=Float,Description="Variant allele frequency">\n')
-        command_str = " ".join(sys.argv)
-        file.write(f"##cmd: {command_str}\n")
         vcf_df.to_csv(file, sep="\t", index=False)
 
 
@@ -274,9 +309,18 @@ def get_support_df(vcf_list, decomposed_dfs_list, caller_names, tolerance, condi
             call_boolean  = any(value.startswith(caller_name) for value in intersect_list)
             caller_column.append(call_boolean)
         ensemble_df[f'{caller_name}'] = caller_column
+    # add in a column for strands
+    strands = []
+    for row in ensemble_df.itertuples():
+        alt = row.ALT_x
+        svtype = row.SVTYPE
+        strands1 = _infer_strands(svtype, alt)
+        strands.append(strands1)
+    ensemble_df["STRANDS"] = strands
 
-    column_names = ['#CHROM_x', 'POS_x', 'locus_group_x', 'ID_list_x',  \
-                    '#CHROM_y', 'POS_y', 'locus_group_y', 'ID_list_y', \
+    column_names = ['#CHROM_x', 'POS_x', 'locus_group_x', 'ID_list_x',
+                    '#CHROM_y', 'POS_y', 'locus_group_y', 'ID_list_y',
+                    'REF_x', 'REF_y', 'ALT_x', 'ALT_y', 'STRANDS',
                     'SVTYPE', 'SVLEN', 'VAF', 'Minda_ID_list_y'] + caller_names
     
     support_df = ensemble_df[column_names].rename(columns={"Minda_ID_list_y": "Minda_IDs"}).copy()
