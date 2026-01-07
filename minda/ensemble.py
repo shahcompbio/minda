@@ -8,37 +8,58 @@ import re
 import gzip
 from minda.decompose import _is_vcf_gz
 
-def parse_bnd_alt(alt_string):
+def _get_strands_from_info(info):
     '''
-    Parse the BND alt string and return separators and region
-    adapted from svtools package
+    Parse info to get strand info
     '''
+    terms = info.split(";")
+    strands = None
+    for term in terms:
+        if term.startswith("STRANDS"):
+            strands_info = term
+            _, strands = strands_info.split("=")
+            break
+    return strands
+
+def _get_strands_from_alt(alt_string):
+    '''
+    Parse alt_string to get strand info (adapted from svtools)
+    :param alt_string: ALT field from vcf
+    return strands
+    '''
+    orientation1 = orientation2 = "+"
     # NOTE The below is ugly but intended to match things like [2:222[ and capture the brackets
     result = re.findall(r'([][])(.+?)([][])', alt_string)
-    assert result, "%s\n" % alt_string
-    sep1, _ , sep2 = result[0]
-    assert sep1 == sep2
-    return sep1
+    # if we couldn't parse return blank strands
+    if not result:
+        return ".."
+    else:
+        sep1, _, sep2 = result[0]
+    # handle different scenarios
+    if sep1 != sep2:
+        # if true we did not parse correctly
+        return ".."
+    if alt_string.startswith(sep1):
+        orientation1 = "-"
+    if sep1 == "[":
+        orientation2 = "-"
+    return orientation1+orientation2
 
-def _infer_strands(svtype, alt):
+def _infer_strands(svtype, alt, info):
     """
     infer SV strands from ALT
     """
-    valid_svtypes = {"DEL", "INS", "DUP", "INV", "BND"}
-    assert svtype in valid_svtypes, f"invalid svtype: {svtype}. must be one of {valid_svtypes}"
-
-    orientation1 = orientation2 = "+"
+    valid_strands = ["++", "--", "+-", "-+"]
     if svtype in ("DEL", "INS") or alt in ("<DEL>", "<INS>"):
-        orientation2 = "-"
-    elif svtype == "DUP" or "DUP" in alt:
-        orientation1 = "-"
+        strands = "+-"
+    elif svtype == "DUP" or alt == "<DUP>":
+        strands = "-+"
     else:
-        sep = parse_bnd_alt(alt)
-        if alt.startswith(sep):
-            orientation1 = "-"
-        if sep == "[":
-            orientation2 = "-"
-    return orientation1+orientation2
+        strands = _get_strands_from_info(info)
+    # infer from alt field if we don't have valid strand info
+    if strands not in valid_strands:
+        strands = _get_strands_from_alt(alt)
+    return strands
 
 def _add_columns(ensemble_df, vaf):
     # create a column of list of prefixed IDs for each locus group
@@ -98,11 +119,11 @@ def _add_columns(ensemble_df, vaf):
 
 
 def _get_ensemble_df(decomposed_dfs_list, caller_names, tolerance, vaf, out_dir, sample_name, args, multimatch):
-    
+
     dfs_1 = [dfs_list[0] for dfs_list in decomposed_dfs_list]
     dfs_2 = [dfs_list[1] for dfs_list in decomposed_dfs_list]
     dfs_list = [dfs_1, dfs_2]
-    
+
     # create stat dfs
     start_dfs_list = []
     start_dfs = pd.concat(dfs_1).reset_index(drop=True)
@@ -178,7 +199,7 @@ def _get_ensemble_df(decomposed_dfs_list, caller_names, tolerance, vaf, out_dir,
         ensemble_df['VAF'] = np.nan
    
     ensemble_df = ensemble_df.drop_duplicates(['locus_group_x', 'locus_group_y']).reset_index(drop=True)
-    
+
     return ensemble_df
 
 
@@ -309,12 +330,17 @@ def get_support_df(vcf_list, decomposed_dfs_list, caller_names, tolerance, condi
             call_boolean  = any(value.startswith(caller_name) for value in intersect_list)
             caller_column.append(call_boolean)
         ensemble_df[f'{caller_name}'] = caller_column
+    # Remove artifact entries with NaN ALT_x values. These can occur when BND mate records
+    # are reindexed during decomposition, creating index collisions with info_df records.
+    # The actual BND events are still properly represented by their working mate records.
+    ensemble_df = ensemble_df[ensemble_df["ALT_x"].notna()].copy()
     # add in a column for strands
     strands = []
     for row in ensemble_df.itertuples():
         alt = row.ALT_x
         svtype = row.SVTYPE
-        strands1 = _infer_strands(svtype, alt)
+        info = row.INFO_x
+        strands1 = _infer_strands(svtype, alt, info)
         strands.append(strands1)
     ensemble_df["STRANDS"] = strands
 
