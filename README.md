@@ -165,4 +165,3 @@ Key contributors:
 ---
 ### Contact
 If you experience any problems or would like to make a suggestion, please submit an [issue](https://github.com/KolmogorovLab/minda/issues).
-To contact the developer directly, email asher.bryant@nih.gov.
