@@ -142,6 +142,13 @@ Both `truthset` and `ensemble` output:
 `ensemble` also outputs:
 * ensemble.vcf
 
+Limitations
+-----------
+
+**SV orientation**
+
+Minda currently does not check orientation when matching SVs for create an ensemble. In principle, it is possible that different callers would output BNDs with same coordinates, but different orientation. In this case, the current version would pick the orientation of the 1st input vcf as representative. We are planning to add SV orientation comparison in the future releases.
+
 License
 -------
 
