@@ -151,7 +151,8 @@ def filter_calls(minda_records, min_vaf, min_sv_len, remove_ins):
             continue
         #if rec.pos_y == 0:
         #    continue
-        if rec.chr_x == rec.chr_y and abs(rec.pos_y - rec.pos_x) < min_sv_len:
+        sv_size = abs(rec.sv_len) if rec.sv_type == "INS" else abs(rec.pos_y - rec.pos_x)
+        if rec.chr_x == rec.chr_y and sv_size < min_sv_len:
             continue
         if remove_ins and rec.sv_type == "INS":
             continue

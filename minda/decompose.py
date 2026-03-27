@@ -257,6 +257,9 @@ def _get_paired_info_dfs(info_df):
     info_df_1 = info_df.copy()
     info_df_2 = info_df.copy()
     info_df_2['POS'] = info_df_2['POS'] + mate_pos_list
+    # For insertions, END = POS + 1 (insertion doesn't span reference bases)
+    ins_mask = info_df_2['SVTYPE'] == 'INS'
+    info_df_2.loc[ins_mask, 'POS'] = info_df_1.loc[ins_mask, 'POS'] + 1
     info_df_2['END'] = info_df_2.INFO.str.extract(r'END=(-?\d+)')[0].astype(pd.Int64Dtype()).abs().to_list()
     #info_df_2['POS'].fillna(info_df_2['END'], inplace=True)
     info_df_2.fillna({'POS':info_df_2['END']}, inplace=True)
@@ -416,6 +419,10 @@ def get_decomposed_dfs(caller_name, df, filter, min_size, prefixed, vaf, sample_
 
     # create SVLEN column determined on start & end df (not all vcfs have SVLEN in INFO)
     decomposed_df_1['SVLEN'] = decomposed_df_1.apply(lambda row: -1 if row['#CHROM'] != decomposed_df_2.loc[row.name, '#CHROM'] else int(abs(row['POS'] - decomposed_df_2.loc[row.name, 'POS'])), axis=1)
+    # For INS, use original SVLEN from INFO (inserted sequence length, not reference span)
+    ins_mask = decomposed_df_1['SVTYPE'] == 'INS'
+    info_svlen = decomposed_df_1['INFO'].str.extract(r'SVLEN=(-?\d+)')[0].astype(pd.Int64Dtype()).abs()
+    decomposed_df_1.loc[ins_mask, 'SVLEN'] = info_svlen[ins_mask]
     max_svlen = decomposed_df_1['SVLEN'].max()
     
     if min_size != None:
