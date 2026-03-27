@@ -8,7 +8,7 @@ RUN apt-get update && \
 
 # Clone the Minda repository
 RUN git clone https://github.com/shahcompbio/minda.git /opt/minda && \
-    cd /opt/minda && git checkout 8b6d81c && \
+    cd /opt/minda && git checkout 1b0377d && \
     git rev-parse --short HEAD > /opt/minda_version.txt && \
     git rev-parse HEAD > /opt/minda_version_full.txt && \
     chmod +x minda.py && \
