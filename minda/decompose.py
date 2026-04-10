@@ -420,9 +420,11 @@ def get_decomposed_dfs(caller_name, df, filter, min_size, prefixed, vaf, sample_
     # create SVLEN column determined on start & end df (not all vcfs have SVLEN in INFO)
     decomposed_df_1['SVLEN'] = decomposed_df_1.apply(lambda row: -1 if row['#CHROM'] != decomposed_df_2.loc[row.name, '#CHROM'] else int(abs(row['POS'] - decomposed_df_2.loc[row.name, 'POS'])), axis=1)
     # For INS, use original SVLEN from INFO (inserted sequence length, not reference span)
+    # Only overwrite where SVLEN exists in INFO; some callers (e.g. Manta) omit it for unresolved insertions
     ins_mask = decomposed_df_1['SVTYPE'] == 'INS'
     info_svlen = decomposed_df_1['INFO'].str.extract(r'SVLEN=(-?\d+)')[0].astype(pd.Int64Dtype()).abs()
-    decomposed_df_1.loc[ins_mask, 'SVLEN'] = info_svlen[ins_mask]
+    valid_ins_mask = ins_mask & info_svlen.notna()
+    decomposed_df_1.loc[valid_ins_mask, 'SVLEN'] = info_svlen[valid_ins_mask].astype('int64')
     max_svlen = decomposed_df_1['SVLEN'].max()
     
     if min_size != None:
